@@ -24,10 +24,24 @@
 	<string>Read Heart Rate Data from Monitor</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>Read Heart Rate Data from Monitor</string>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string>Your location is used to track position during heart rate recording.</string>
 	<key>NSLocationAlwaysAndWhenInUseUsageDescription</key>
 	<string>Your location is used to track position during heart rate recording.</string>
+	<key>NSLocationWhenInUseUsageDescription</key>
+	<string>Your location is used to track position during heart rate recording.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-peripheral</string>
+		<string>fetch</string>
+		<string>processing</string>
+		<string>external-accessory</string>
+		<string>location</string>
+		<string>remote-notification</string>
+		<string>bluetooth-central</string>
+		<string>nearby-interaction</string>
+		<string>voip</string>
+		<string>audio</string>
+		<string>push-to-talk</string>
+	</array>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

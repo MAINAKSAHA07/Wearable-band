@@ -47,6 +47,9 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
     var locationManager: CLLocationManager!
     var currentLocation: CLLocation?
     
+    // Add backgroundTask as a class property
+    private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
+    
     //MARK:- Functions
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -61,7 +64,9 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
         locationManager = CLLocationManager()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
-        locationManager.requestWhenInUseAuthorization()
+        locationManager.allowsBackgroundLocationUpdates = true
+        locationManager.pausesLocationUpdatesAutomatically = false
+        locationManager.requestAlwaysAuthorization()
     }
     
     private func setupRecordButton() {
@@ -216,6 +221,13 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
         startTime = Date()
         recordButton.setTitle("Stop Recording", for: .normal)
         
+        // Request background execution time
+        backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "RecordingTask") {
+            // Clean up if the task expires
+            UIApplication.shared.endBackgroundTask(self.backgroundTask)
+            self.backgroundTask = .invalid
+        }
+        
         // Ensure location updates are active
         if CLLocationManager.authorizationStatus() == .authorizedWhenInUse {
             locationManager.startUpdatingLocation()
@@ -266,6 +278,12 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
         
         // Stop location updates
         locationManager.stopUpdatingLocation()
+        
+        // End background task
+        if backgroundTask != .invalid {
+            UIApplication.shared.endBackgroundTask(backgroundTask)
+            backgroundTask = .invalid
+        }
         
         // Get the current mode for the filename
         let mode = monitor.r24SportMode != nil ? sportMode.rawValue.description : "Standard"
@@ -331,8 +349,14 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
     }
     
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        // Update the current location with the latest location
         currentLocation = locations.last
         print("Location updated: \(String(describing: currentLocation?.coordinate))")
+        
+        // Log the location update for debugging
+        if let location = currentLocation {
+            print("Latitude: \(location.coordinate.latitude), Longitude: \(location.coordinate.longitude)")
+        }
     }
     
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
