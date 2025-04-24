@@ -4,6 +4,8 @@
 <dict>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleDocumentTypes</key>
+	<array/>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -20,6 +22,8 @@
 	<string>1</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>MKDirectionsApplicationSupportedModes</key>
+	<array/>
 	<key>NSBluetoothAlwaysUsageDescription</key>
 	<string>Read Heart Rate Data from Monitor</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
@@ -28,6 +32,8 @@
 	<string>Your location is used to track position during heart rate recording.</string>
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Your location is used to track position during heart rate recording.</string>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>This app needs access to the microphone to measure ambient sound levels during your workout.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>bluetooth-peripheral</string>

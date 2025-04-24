@@ -11,6 +11,7 @@ import ScoscheSDK24
 import CoreBluetooth
 import UIKit
 import CoreLocation
+import AVFoundation
 
 /// dataViewController: Demo of connecting to a Scosche devices with BLE interface. View uses ScoscheViewController to extend a standard UIViewController with services that report monitor activity.
 ///
@@ -50,6 +51,13 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
     // Add backgroundTask as a class property
     private var backgroundTask: UIBackgroundTaskIdentifier = .invalid
     
+    // Audio measurement properties
+    private var audioEngine: AVAudioEngine?
+    private var audioInputNode: AVAudioInputNode?
+    private var currentSoundLevel: Float = 0.0
+    private var currentFrequency: Float = 0.0
+    private var soundLevelTimer: Timer?
+    
     //MARK:- Functions
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -64,9 +72,18 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
         locationManager = CLLocationManager()
         locationManager.delegate = self
         locationManager.desiredAccuracy = kCLLocationAccuracyBest
+        locationManager.distanceFilter = kCLDistanceFilterNone // Update for any movement
         locationManager.allowsBackgroundLocationUpdates = true
         locationManager.pausesLocationUpdatesAutomatically = false
-        locationManager.requestAlwaysAuthorization()
+        locationManager.activityType = .fitness // Optimize for fitness tracking
+        
+        // Request appropriate authorization
+        if CLLocationManager.authorizationStatus() == .notDetermined {
+            locationManager.requestAlwaysAuthorization()
+        }
+        
+        // Setup audio measurement
+        setupAudioMeasurement()
     }
     
     private func setupRecordButton() {
@@ -94,6 +111,11 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
         
         // Adjust table view constraints
         tableview.translatesAutoresizingMaskIntoConstraints = false
+        
+        // Remove any existing constraints
+        tableview.constraints.forEach { $0.isActive = false }
+        
+        // Add new constraints
         NSLayoutConstraint.activate([
             tableview.topAnchor.constraint(equalTo: recordButton.bottomAnchor, constant: 16),
             tableview.leadingAnchor.constraint(equalTo: view.leadingAnchor),
@@ -102,7 +124,78 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
         ])
     }
     
-    override func reloadTableData(){
+    private func setupAudioMeasurement() {
+        let audioSession = AVAudioSession.sharedInstance()
+        do {
+            try audioSession.setCategory(.playAndRecord, mode: .measurement, options: .mixWithOthers)
+            try audioSession.setActive(true)
+            
+            audioEngine = AVAudioEngine()
+            guard let inputNode = audioEngine?.inputNode else {
+                print("Could not get audio input node")
+                return
+            }
+            
+            // Set up audio tap to measure levels
+            let format = inputNode.outputFormat(forBus: 0)
+            inputNode.installTap(onBus: 0, bufferSize: 1024, format: format) { [weak self] buffer, time in
+                guard let self = self else { return }
+                
+                // Calculate RMS (Root Mean Square) for sound level
+                guard let channelData = buffer.floatChannelData?[0] else { return }
+                let frameLength = UInt32(buffer.frameLength)
+                
+                var sum: Float = 0.0
+                for i in 0..<Int(frameLength) {
+                    let sample = channelData[i]
+                    sum += sample * sample
+                }
+                
+                let rms = sqrt(sum / Float(frameLength))
+                
+                // Convert to dB
+                let db = 20 * log10(rms)
+                
+                // Calculate sound intensity
+                let intensity = pow(10, db / 20)
+                
+                // Update on main thread
+                DispatchQueue.main.async {
+                    self.currentSoundLevel = db
+                    
+                    // Calculate frequency
+                    let maxIndex = self.findPeakFrequency(data: channelData, frameLength: frameLength)
+                    self.currentFrequency = Float(maxIndex) * Float(format.sampleRate) / Float(frameLength)
+                    
+                    // Print real-time values
+                    print("Sound Metrics - dB: \(String(format: "%.2f", db)) | Intensity: \(String(format: "%.4f", intensity)) | Frequency: \(String(format: "%.1f", self.currentFrequency)) Hz")
+                }
+            }
+            
+            try audioEngine?.start()
+            print("Audio measurement started - Monitoring sound levels...")
+            
+        } catch {
+            print("Failed to set up audio measurement: \(error)")
+        }
+    }
+    
+    private func findPeakFrequency(data: UnsafePointer<Float>, frameLength: UInt32) -> Int {
+        var maxValue: Float = 0.0
+        var maxIndex: Int = 0
+        
+        for i in 0..<Int(frameLength) {
+            let value = abs(data[i])
+            if value > maxValue {
+                maxValue = value
+                maxIndex = i
+            }
+        }
+        
+        return maxIndex
+    }
+    
+    override func reloadTableData() {
         listData = []
         listData.append(cellRow(type: .normal, value: "Sensor Name: \(monitor.deviceName ?? "Unknown")"))
         if monitor.r24SportMode != nil {
@@ -113,6 +206,18 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
         listData.append(cellRow(type: .normal, value: "RR Interval: \(rrInterval)"))
         listData.append(cellRow(type: .normal, value: "Signal Quality: \(signalQuality)"))
         listData.append(cellRow(type: .normal, value: "Battery Level: \(batteryLevel)"))
+        
+        // Add location information to the table
+        if let location = currentLocation {
+            listData.append(cellRow(type: .normal, value: "Latitude: \(location.coordinate.latitude)"))
+            listData.append(cellRow(type: .normal, value: "Longitude: \(location.coordinate.longitude)"))
+            listData.append(cellRow(type: .normal, value: "Altitude: \(location.altitude)"))
+            listData.append(cellRow(type: .normal, value: "Speed: \(location.speed) m/s"))
+            listData.append(cellRow(type: .normal, value: "Accuracy: \(location.horizontalAccuracy) m"))
+        } else {
+            listData.append(cellRow(type: .normal, value: "Location: Not Available"))
+        }
+        
         listData.append(cellRow(type: .user, value: "User Name: \(userInfo.name)"))
         listData.append(cellRow(type: .user, value: "Resting Heart Rate: \(userInfo.restinghr)"))
         listData.append(cellRow(type: .user, value: "Maximum Heart Rate: \(userInfo.maxhr)"))
@@ -124,6 +229,7 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
         listData.append(cellRow(type: .normal, value: "Zone Two: \(userInfo.hrZoneTwo)"))
         listData.append(cellRow(type: .normal, value: "Zone Three: \(userInfo.hrZoneThree)"))
         listData.append(cellRow(type: .normal, value: "Zone Four: \(userInfo.hrZoneFour)"))
+        
         if fitFileList.count == 0 {
             listData.append(cellRow(type: .normal, value: "FitFile Count: \(fitFileList.count)"))
         } else {
@@ -144,6 +250,12 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
         listData.append(cellRow(type: .normal, value: "VDC Data 5: \(vdcRRIDataRegister5)"))
         listData.append(cellRow(type: .normal, value: "VDC Data Timestamp: \(vdcRRITimestamp)"))
         listData.append(cellRow(type: .normal, value: "VDC Data Status: \(vdcRRIStatus)"))
+        
+        // Add sound measurement information
+        listData.append(cellRow(type: .normal, value: "Sound Level: \(String(format: "%.2f", currentSoundLevel)) dB"))
+        listData.append(cellRow(type: .normal, value: "Sound Intensity: \(String(format: "%.4f", pow(10, currentSoundLevel / 20)))"))
+        listData.append(cellRow(type: .normal, value: "Frequency: \(String(format: "%.1f", currentFrequency)) Hz"))
+        
         tableview.reloadData()
     }
     
@@ -223,20 +335,20 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
         
         // Request background execution time
         backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "RecordingTask") {
-            // Clean up if the task expires
             UIApplication.shared.endBackgroundTask(self.backgroundTask)
             self.backgroundTask = .invalid
         }
         
-        // Ensure location updates are active
-        if CLLocationManager.authorizationStatus() == .authorizedWhenInUse {
+        // Start location updates
+        if CLLocationManager.authorizationStatus() == .authorizedWhenInUse || 
+           CLLocationManager.authorizationStatus() == .authorizedAlways {
             locationManager.startUpdatingLocation()
         }
         
         // Create CSV file with headers
         if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
             let fileURL = dir.appendingPathComponent("heartrate_location_data.csv")
-            let header = "Timestamp,Heart Rate,Latitude,Longitude,Altitude,Speed(m/s),Sport Mode\n"
+            let header = "Timestamp,Heart Rate,Latitude,Longitude,Altitude,Speed(m/s),Sound Level(dB),Frequency(Hz),Sound Intensity,Sport Mode\n"
             try? header.write(to: fileURL, atomically: true, encoding: .utf8)
         }
         
@@ -251,9 +363,12 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
             let speed = location?.speed ?? 0.0
             let mode = self.monitor.r24SportMode != nil ? self.sportMode.rawValue.description : "Standard"
             
+            // Calculate sound intensity
+            let soundIntensity = pow(10, self.currentSoundLevel / 20)
+            
             let dateFormatter = DateFormatter()
             dateFormatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
-            let reading = "\(dateFormatter.string(from: Date())),\(self.heartRate),\(latitude),\(longitude),\(altitude),\(speed),\(mode)\n"
+            let reading = "\(dateFormatter.string(from: Date())),\(self.heartRate),\(latitude),\(longitude),\(altitude),\(speed),\(self.currentSoundLevel),\(self.currentFrequency),\(soundIntensity),\(mode)\n"
             
             // Save the reading to file
             if let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first {
@@ -268,6 +383,11 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
             
             // Record heart rate
             self.heartRateReadings.append((Date(), self.heartRate))
+            
+            // Update UI
+            DispatchQueue.main.async {
+                self.reloadTableData()
+            }
         }
     }
     
@@ -294,12 +414,10 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
             dateFormatter.dateFormat = "yyyy-MM-dd_HH-mm-ss"
             let timestamp = dateFormatter.string(from: Date())
             
-            // Include mode in filename
-            let filename = "heartrate_location_\(mode)_\(timestamp).csv"
+            let filename = "heartrate_location_sound_\(mode)_\(timestamp).csv"
             let oldURL = dir.appendingPathComponent("heartrate_location_data.csv")
             let newURL = dir.appendingPathComponent(filename)
             
-            // Rename the file to include the mode and timestamp
             try? FileManager.default.moveItem(at: oldURL, to: newURL)
             
             let alert = UIAlertController(
@@ -349,18 +467,34 @@ class dataViewController: SchoscheViewController, UITableViewDelegate, UITableVi
     }
     
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
+        guard let location = locations.last else { return }
+        
         // Update the current location with the latest location
-        currentLocation = locations.last
-        print("Location updated: \(String(describing: currentLocation?.coordinate))")
+        currentLocation = location
         
         // Log the location update for debugging
-        if let location = currentLocation {
-            print("Latitude: \(location.coordinate.latitude), Longitude: \(location.coordinate.longitude)")
+        print("Location updated: Latitude: \(location.coordinate.latitude), Longitude: \(location.coordinate.longitude)")
+        
+        // Update UI on main thread
+        DispatchQueue.main.async {
+            self.reloadTableData()
         }
     }
     
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
         print("Location manager failed with error: \(error.localizedDescription)")
+        
+        // Show error to user if needed
+        if let clError = error as? CLError {
+            switch clError.code {
+            case .denied:
+                print("Location access denied")
+            case .locationUnknown:
+                print("Location unknown")
+            default:
+                print("Location error: \(clError.localizedDescription)")
+            }
+        }
     }
     
     // MARK: - CBCentralManagerDelegate Methods
